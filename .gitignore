@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-run/
+.cache/
+.env
+.env.*
+!.env.example
+game.config.prod.json
+game.config.playground.json
+*.log

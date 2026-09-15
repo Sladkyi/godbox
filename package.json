@@ -1,0 +1,27 @@
+{
+  "name": "godbox",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "GodBox — a living 2D and 3D world sandbox for RUN.world",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "playground": "vite --mode playground --host 127.0.0.1",
+    "build": "vite build",
+    "build:run": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "preview:run": "vite preview --host 127.0.0.1",
+    "test": "node --test tests/*.test.js",
+    "deploy": "npm run build && rundot deploy"
+  },
+  "dependencies": {
+    "@series-inc/rundot-game-sdk": "5.27.0",
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "@revenuecat/purchases-js": "1.39.1",
+    "firebase": "12.12.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.0"
+  }
+}
