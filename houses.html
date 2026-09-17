@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#141d28" />
+    <title>GodBox · House catalog</title>
+    <link rel="icon" type="image/svg+xml" href="./public/icon.svg" />
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+      :root { font-family: Manrope, 'Segoe UI', sans-serif; color: #e8ede5; background: #141d28; --mint: #c6e9a8; --line: #ffffff14; --muted: #8c9aa1; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; background: radial-gradient(1200px 600px at 10% -10%, #243445, #141d28 55%); }
+      a { color: var(--mint); }
+      header { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: flex-end; justify-content: space-between; padding: 22px 28px 16px; background: #141d28f2; border-bottom: 1px solid #35434b; backdrop-filter: blur(12px); }
+      .brand { display: flex; flex-direction: column; gap: 4px; }
+      .brand span { font-size: 8px; letter-spacing: 1.6px; color: #9dad9d; font-weight: 700; }
+      h1 { margin: 0; font-size: 22px; letter-spacing: .08em; }
+      .brand p { margin: 0; font-size: 12px; color: var(--muted); }
+      .filters { display: flex; flex-wrap: wrap; gap: 10px; }
+      label { display: grid; gap: 5px; font-size: 8px; font-weight: 700; letter-spacing: 1.2px; color: #9aa8ab; text-transform: uppercase; }
+      select { color: inherit; background: #ffffff08; border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; min-width: 140px; font: inherit; font-size: 12px; }
+      main { padding: 22px 28px 80px; display: grid; gap: 36px; }
+      .status { color: var(--muted); font-size: 12px; }
+      .race-block { display: grid; gap: 16px; }
+      .race-block h2 { margin: 0; display: flex; align-items: center; gap: 10px; font-size: 15px; scroll-margin-top: 118px; }
+      .swatch { width: 10px; height: 22px; border-radius: 3px; background: var(--race); }
+      .setting-row { display: grid; gap: 8px; }
+      .setting-row h3 { margin: 0; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #a7b5b6; }
+      .cards { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+      .card { margin: 0; background: #18242ef0; border: 1px solid #a6c4bc22; border-radius: 12px; overflow: hidden; }
+      .card img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: #1a2a32; }
+      .card figcaption { padding: 9px 10px 11px; }
+      .card strong { display: block; font-size: 12px; line-height: 1.35; }
+      .card small { color: var(--muted); font-size: 10px; }
+      .studio { position: fixed; top: 0; left: 0; width: 280px; height: 280px; opacity: 0; pointer-events: none; }
+      @media (max-width: 1100px) { .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+      @media (max-width: 640px) {
+        header, main { padding-left: 14px; padding-right: 14px; }
+        .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        select { min-width: 120px; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <span>GodBox catalog</span>
+        <h1>Every roof</h1>
+        <p>Houses, halls, fields and folds for each people, ground and age.</p>
+      </div>
+      <div class="filters">
+        <label>Kind <select id="type">
+          <option value="house">Houses</option>
+          <option value="hall">Halls</option>
+          <option value="farm">Fields</option>
+          <option value="pen">Folds</option>
+        </select></label>
+        <label>People <select id="race">
+          <option value="all">All peoples</option>
+        </select></label>
+        <label>Ground <select id="setting">
+          <option value="all">All grounds</option>
+        </select></label>
+        <label>Material <select id="material">
+          <option value="typical">Typical for the people</option>
+        </select></label>
+        <label>Variant <select id="variant">
+          <option value="0">Variant A</option>
+          <option value="1">Variant B</option>
+          <option value="2">Variant C</option>
+        </select></label>
+      </div>
+    </header>
+    <main>
+      <p class="status" id="status">Raising the catalog…</p>
+      <div id="catalog"></div>
+    </main>
+    <canvas class="studio" id="studio" width="280" height="280" aria-hidden="true"></canvas>
+    <script type="module" src="./src/houses-gallery.js"></script>
+  </body>
+</html>

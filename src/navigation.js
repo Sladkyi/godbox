@@ -26,7 +26,7 @@ export class Navigation {
     if (this.revision === this.world.navRevision) return;
     const w = this.world, queue = new Int32Array(w.tiles.length);
     this.blocked.fill(0); this.regions.fill(0);
-    for (const b of w.buildings) if (b.complete && b.type !== 'farm') this.blocked[w.index(b.x,b.y)] = 1;
+    for (const b of w.buildings) if (b.complete && b.type !== 'farm' && b.type !== 'pen') this.blocked[w.index(b.x,b.y)] = 1;
     let region = 0;
     for (let i=0;i<w.tiles.length;i++) {
       if (this.regions[i] || !this.passable(i%w.width, Math.floor(i/w.width))) continue;

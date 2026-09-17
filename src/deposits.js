@@ -28,7 +28,7 @@ export function seedDeposits(w) {
     if(kind)addDeposit(w,kind,x,y,24+v%17);
   }
   for(const v of w.villages){
-    const kind={human:'stone',ghoul:'iron',alien:'crystal',mycelite:'mycelium'}[v.race??'human'];let placed=0;
+    const kind={human:'stone',dwarf:'iron',ghoul:'iron',alien:'crystal',mycelite:'mycelium'}[v.race??'human'];let placed=0;
     for(let n=0;n<40&&placed<3;n++){
       const a=n*2.4,r=5+n%7,x=v.x+Math.cos(a)*r,y=v.y+Math.sin(a)*r;
       if(!w.walkable(x,y)||!w.humans.navigation.sameRegion(v,{x,y}))continue;

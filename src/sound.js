@@ -18,9 +18,16 @@ const STINGS = {
   wolves: { f: 220, t: .9, type: 'sawtooth', vol: .09 },
   drought: { f: 160, t: .6, type: 'sine', vol: .06 },
   trade: { f: 520, t: .25, type: 'triangle', vol: .07 },
+  market: { f: 480, t: .4, type: 'triangle', vol: .08 },
   ally: { f: 380, t: .4, type: 'sine', vol: .08 },
   gift: { f: 500, t: .45, type: 'sine', vol: .08 },
   refuge: { f: 150, t: .5, type: 'triangle', vol: .07 },
+  weather: { f: 240, t: .55, type: 'sine', vol: .07 },
+  festival: { f: 560, t: .45, type: 'triangle', vol: .08 },
+  relief: { f: 480, t: .4, type: 'sine', vol: .07 },
+  tribute: { f: 200, t: .4, type: 'triangle', vol: .06 },
+  marriage: { f: 520, t: .5, type: 'sine', vol: .08 },
+  betrayal: { f: 90, t: .55, type: 'sawtooth', vol: .08 },
 };
 
 const MOOD = {
@@ -35,6 +42,7 @@ export function moodOf(world) {
   const s = world.stats();
   if (s.burning > 4) return 'fire';
   if (world.villages.some(v => (v.wars ?? []).length)) return 'war';
+  if ((world.weather ?? []).some(w => w.kind === 'storm' || w.kind === 'blizzard' || w.kind === 'drought')) return 'tense';
   if (world.story?.pending || world.units.some(u => u.kind === 'wolf' && world.units.some(a => a.kind === 'sheep' || a.kind === 'human'))) return 'tense';
   if (s.forests > s.land * .28) return 'forest';
   return 'calm';

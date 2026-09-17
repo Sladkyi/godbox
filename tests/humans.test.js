@@ -36,7 +36,8 @@ test('wood is harvested from finite trees and carried back to the village',()=>{
   step(w,28);
   assert.ok(u.harvested>=2,'gathering work must reach completion');
   assert.ok(u.delivered>=2,'wood must reach the store');
-  assert.equal(v.wood+u.inventory.wood+w.wood[resource],8,'no wood is created for free');
+  const spent=w.buildings.reduce((n,b)=>n+(b.cost?.wood??0),0);
+  assert.equal(v.wood+u.inventory.wood+w.wood[resource]+spent,8,'no wood is created for free');
   assert.ok(u.skills.chop>0);
 });
 
@@ -96,6 +97,14 @@ test('version 1 saves migrate and malformed AI routes are rejected',()=>{
   for(const u of old.units)if(u.kind==='human'){delete u.traits;delete u.path;delete u.skills;}
   const migrated=World.deserialize(JSON.stringify(old));assert.ok(migrated.units.filter(u=>u.kind==='human').every(u=>u.traits.length===2&&Array.isArray(u.path)));
   const invalid=JSON.parse(w.serialize());invalid.units.find(u=>u.kind==='human').path=[-1];assert.throws(()=>World.deserialize(JSON.stringify(invalid)));
+});
+
+test('a town can keep growing past 500 people',()=>{
+  const w=new World({preset:'continent'});
+  const p=w.findLand(96,64);while(w.units.length<520)assert.ok(w.spawn('human',p.x,p.y,w.villages[0].id));
+  assert.ok(w.units.length>=520);
+  w.updatePopulations();
+  assert.equal(w.villages[0].epoch,'capital');
 });
 
 test('500 humans keep finite needs and a save below the RUN storage limit',()=>{
@@ -225,4 +234,105 @@ test('aliens cheer at distant crystals that humans do not notice',()=>{
   assert.ok(w.paint('crystal',10,30));
   assert.equal(alien.action,'cheer');
   assert.notEqual(human.action,'cheer');
+});
+
+test('people choose to herd nearby wild sheep',()=>{
+  const w=plain(),v=w.createVillage(20,20,true);
+  const u=w.spawn('human',21.5,20.5,v.id);comfortable(u);u.job='herder';u.age=24;
+  v.food=80;v.wood=80;
+  const sheep=w.spawn('sheep',23.5,20.5);
+  w.humans.prepare();w.humans.choose(u);
+  assert.equal(u.action,'herd');
+  assert.equal(u.task.targetId,sheep.id);
+});
+
+test('a herder catches a sheep and drives it into a fold',()=>{
+  const w=plain(),v=w.createVillage(20,20,true);
+  const u=w.spawn('human',21.5,20.5,v.id);comfortable(u);u.job='herder';u.age=24;
+  v.food=80;v.wood=80;
+  const pen=w.addBuilding(v,'pen',true);
+  assert.ok(pen);
+  const sheep=w.spawn('sheep',22.5,20.5);
+  w.humans.prepare();
+  assert.ok(w.humans.setTask(u,{type:'herd',x:sheep.x,y:sheep.y,reason:'herd',targetId:sheep.id}));
+  step(w,22);
+  assert.equal(sheep.villageId,v.id);
+  assert.equal(sheep.penId,pen.id);
+  assert.ok(w.events.some(e=>e.type==='herd'&&e.message.includes(u.name)));
+});
+
+test('a town with wild sheep starts a fold',()=>{
+  const w=plain(),v=w.createVillage(20,20,true);
+  v.food=80;v.wood=40;
+  for(let i=0;i<4;i++)w.spawn('sheep',24.5+i*.2,20.5);
+  const u=w.spawn('human',21.5,20.5,v.id);comfortable(u);u.age=24;
+  step(w,8);
+  assert.ok(w.buildings.some(b=>b.type==='pen'));
+});
+
+test('a growing town still raises a fold before extra houses',()=>{
+  const w=plain(),v=w.createVillage(20,20,true);
+  v.food=80;v.wood=40;
+  for(let i=0;i<8;i++){const u=w.spawn('human',21.2+i*.12,20.5,v.id);comfortable(u);u.age=24;}
+  for(let i=0;i<4;i++)w.spawn('sheep',24.5+i*.2,20.5);
+  step(w,8);
+  assert.ok(w.buildings.some(b=>b.type==='pen'));
+});
+
+test('ghouls hunt cows instead of herding them',()=>{
+  const w=plain(),g=w.spawn('ghoul',10.5,10.5),cow=w.spawn('cow',12.5,10.5);
+  comfortable(g);g.hunger=70;w.humans.prepare();w.humans.choose(g);
+  assert.equal(g.action,'hunt');assert.equal(g.task.targetId,cow.id);
+});
+
+test('dwarves live long, keep hardy, and raise stronger halls',()=>{
+  const human=plain(),hv=human.createVillage(20,20,true,'human');
+  const dwarf=plain(),dv=dwarf.createVillage(20,20,true,'dwarf');
+  const u=dwarf.spawn('dwarf',20.5,20.5,dv.id);
+  assert.equal(u.race,'dwarf');
+  assert.ok(u.lifetime>90);
+  assert.ok(u.traits.includes('hardy'));
+  assert.ok(u.skills.mine>=1);
+  assert.ok(dwarf.buildings.find(b=>b.type==='hall').hp>human.buildings.find(b=>b.type==='hall').hp);
+  assert.equal(dv.name,'Irondeep');
+});
+
+test('dwarves and humans bind as allies with less trust than strangers',()=>{
+  const w=plain(),a=w.createVillage(12,12,true,'dwarf'),b=w.createVillage(28,12,true,'human');
+  a.known=[b.id];b.known=[a.id];
+  a.ties=[{id:b.id,debt:0,grudge:0,trust:14,legend:''}];
+  b.ties=[{id:a.id,debt:0,grudge:0,trust:14,legend:''}];
+  w.humans.prepare();
+  assert.equal(w.humans.tryAlliance(),true);
+  assert.ok((a.allies??[]).includes(b.id));
+});
+
+test('known towns trade food for a real store good and send a cart',()=>{
+  const w=plain(),buyer=w.createVillage(12,12,true),seller=w.createVillage(28,12,true);
+  buyer.known=[seller.id];seller.known=[buyer.id];
+  buyer.food=50;seller.food=20;seller.iron=12;buyer.iron=0;
+  const trader=w.spawn('human',28.5,12.5,seller.id);comfortable(trader);trader.age=24;
+  w.humans.prepare();
+  assert.equal(w.humans.tryTrade(),true);
+  assert.ok(buyer.iron>=3);
+  assert.ok(seller.food>20);
+  assert.equal(buyer.lastTrade?.good,'iron');
+  assert.equal(seller.lastTrade?.partnerId,buyer.id);
+  assert.ok(w.caravans.some(c=>c.good==='iron'&&c.fromId===seller.id&&c.toId===buyer.id));
+  assert.ok(w.events.some(e=>e.type==='trade'&&e.message.includes('iron')));
+  const copy=World.deserialize(w.serialize());
+  assert.equal(copy.villages.find(v=>v.id===buyer.id).lastTrade.good,'iron');
+  assert.equal(copy.villages.find(v=>v.id===seller.id).iron,seller.iron);
+});
+
+test('a market stamp on a town opens a road and forces a deal',()=>{
+  const w=plain(),home=w.createVillage(12,12,true),there=w.createVillage(30,12,true);
+  home.food=2;there.stone=0;there.food=8;
+  w.spawn('human',12.5,12.5,home.id);
+  assert.equal(w.paint('trade',12,12),true);
+  assert.ok((home.known??[]).includes(there.id));
+  assert.ok((home.market??0)>=40);
+  assert.ok(home.lastTrade||there.lastTrade);
+  assert.ok(w.caravans.length>=1);
+  assert.equal(w.paint('trade',2,2),false);
 });

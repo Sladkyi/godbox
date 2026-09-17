@@ -8,3 +8,4 @@ dist-run/
 game.config.prod.json
 game.config.playground.json
 *.log
+.shots/

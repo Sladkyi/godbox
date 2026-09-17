@@ -22,9 +22,10 @@ Open http://127.0.0.1:5173. Locally, Save downloads a JSON world file; the folde
 - Meadow, forest, sand, ocean, mountain, and snow brushes.
 - People of four races, sheep, and wolves. Three adults of the same race on connected land found a town.
 - Fire, rain, lightning, and meteor with a dedicated 3D strike animation; disasters are written into the chronicle of the town they hit. Flooding and erase tools.
+- Faith is the player's own resource. Every tool carries a price, shown on the button and previewed on the meter in the header; a tool you cannot afford goes dark and a cast is refused. Living towns pray faith back year after year — a town that names you patron pays far more and raises the ceiling, a town that fears you pays almost nothing. The meter opens a panel listing every believing town and what it is worth. Miracle prices can be switched off for free sculpting, in the panel or when creating a world.
 - Pause, speeds 1× / 2× / 5×, cell and person details, chronicle.
 - Person card: activity and decision reason, needs, temperament, skills, family, and personal events. Follow zooms the camera; the selected path is visible in both views.
-- World and AI save, damaged-file checks, version 1 save migration, 500-creature cap.
+- World and AI save, damaged-file checks, migration of version 1 to 3 saves, 500-creature cap. A world saved before faith existed opens with a full meter.
 
 ## How people behave
 
@@ -86,4 +87,4 @@ npm test
 npm run build:run
 ```
 
-Tests cover generation, pathfinding and rebuilds, finite resources and stores, building, need priorities, families, island isolation, fire/rain, flooding, old-save migration, reproducible simulation, the 500-creature cap, and save size. Separate cases cover ghoul hunting, store theft, guard clashes, mycelite spores, alien crystal feeding, sheep flight, and disaster chronicle entries. 3D geometry and brush coordinates after both cameras change are also tested. A narrow browser window does not replace a performance check on a physical phone.
+Tests cover generation, pathfinding and rebuilds, finite resources and stores, building, need priorities, families, island isolation, fire/rain, flooding, old-save migration, reproducible simulation, the 500-creature cap, and save size. Faith has its own cases: prices scale with the brush, an empty god cannot cast, patrons outpay the fearful, the meter refills and stops at the ceiling, free creation never charges, and spent faith survives a save. Separate cases cover ghoul hunting, store theft, guard clashes, mycelite spores, alien crystal feeding, sheep flight, and disaster chronicle entries. 3D geometry and brush coordinates after both cameras change are also tested. A narrow browser window does not replace a performance check on a physical phone.

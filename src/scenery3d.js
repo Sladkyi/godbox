@@ -1,9 +1,21 @@
 import * as THREE from 'three';
-import { RACES, RESOURCES } from './civilizations.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RACES, RESOURCES, epochOf } from './civilizations.js';
 import { tileHeight } from './terrain3d.js';
+import { houseKit, houseForm, buildHouse, disposeHouseGeometry } from './houses3d.js';
 
-const MATERIAL_PALETTES={wood:['#bfa37e','#806044','#d8c38e'],stone:['#9cacb3','#596e80','#d7e1d5'],iron:['#687988','#424a61','#d6a17b'],crystal:['#679aa8','#6884ad','#91efe7'],clay:['#d2a08b','#986955','#f1cf9e'],mycelium:['#c1b0bb','#875fa1','#e4d9ac']};
+const MATERIAL_PALETTES={wood:['#ead6ab','#8b4f36','#f3e2b6'],stone:['#c8d3d8','#5a6d7c','#e7eee8'],iron:['#7c8b98','#3c4458','#d08a5c'],crystal:['#7ebac8','#6a90c4','#b6fff4'],clay:['#e8b898','#a66c52','#f6dcb4'],mycelium:['#d6c4d2','#7a4e98','#f0e6c0']};
+const SITE_TINT={meadow:['#3a5a28',.12],coast:['#4a8890',.2],forest:['#3a5230',.26],sand:['#c9a066',.26],highland:['#6a7884',.28],frost:['#d5e4ea',.3],waste:['#4a433c',.34]};
+const SOIL={meadow:'#806949',coast:'#6a6b4a',forest:'#4f5c38',sand:'#b08a58',highland:'#6d6550',frost:'#8a8b78',waste:'#5a4a3a'};
+const YARD={meadow:'#6f7d4c',coast:'#6a7a58',forest:'#4f6a42',sand:'#9a8a52',highland:'#6a7360',frost:'#8a9580',waste:'#5a5644'};
 const BUILDING = .5;
+const WINDOW_LIGHT={human:'#ffd79a',dwarf:'#ffc078',ghoul:'#ff9b86',alien:'#9ef0e8',mycelite:'#ffe3a4'};
+function hexMix(a, b, t=.35) {
+  const n=c=>parseInt(c.slice(1),16),pa=n(a),pb=n(b),ch=s=>Math.round(((pa>>s)&255)*(1-t)+((pb>>s)&255)*t);
+  return `#${((ch(16)<<16)|(ch(8)<<8)|ch(0)).toString(16).padStart(6,'0')}`;
+}
+// One id gives a house its variant, its lean and its size, so a street never repeats itself.
+function scatter(id) { return Math.imul((id ?? 1) ^ 0x9e3779b9, 2654435761) >>> 0; }
 
 export class Scenery3D {
   constructor(r) {
@@ -18,66 +30,124 @@ export class Scenery3D {
     this.particles=r.instances(new THREE.BoxGeometry(1,1,1),new THREE.MeshBasicMaterial({color:0xffffff}),2400,false,this.nodeGroup);
   }
   mat(color,glow=false) {
-    const key=color+glow;if(!this.palette.has(key))this.palette.set(key,new THREE.MeshStandardMaterial({color,roughness:glow?.35:.88,metalness:glow?.3:0,emissive:glow?color:'#000000',emissiveIntensity:glow?.25:0,flatShading:true}));return this.palette.get(key);
+    const lit=glow===true?.25:glow||0,key=`${color}|${lit}`;
+    if(!this.palette.has(key))this.palette.set(key,new THREE.MeshStandardMaterial({color,roughness:lit?.35:.88,metalness:lit?.3:0,emissive:lit?color:'#000000',emissiveIntensity:lit,flatShading:true}));
+    return this.palette.get(key);
   }
-  structure(b) {
+  // A house is drawn as twenty odd little meshes, then flattened into one so the GPU
+  // pays for the materials it uses rather than for every plank and window.
+  structure(b) { const local=this.raise(b); if(local)this.fuse(local); }
+  fuse(group) {
+    const byMaterial=new Map();
+    for(const child of group.children) {
+      if(!child.isMesh||!child.geometry)continue;
+      child.updateMatrix();
+      const geometry=child.geometry.clone().applyMatrix4(child.matrix);
+      const list=byMaterial.get(child.material);
+      if(list)list.push(geometry);else byMaterial.set(child.material,[geometry]);
+    }
+    if(!byMaterial.size)return;
+    const parts=[],materials=[],spent=[];
+    for(const [material,list] of byMaterial) {
+      const part=list.length===1?list[0]:mergeGeometries(list,false);
+      if(list.length>1)spent.push(...list);
+      if(!part){spent.forEach(geometry=>geometry.dispose());return;}
+      parts.push(part);materials.push(material);
+    }
+    const merged=mergeGeometries(parts,true);
+    spent.forEach(geometry=>geometry.dispose());parts.forEach(geometry=>geometry.dispose());
+    if(!merged)return;
+    group.clear();
+    const mesh=new THREE.Mesh(merged,materials);mesh.castShadow=true;mesh.receiveShadow=true;group.add(mesh);
+  }
+  raise(b) {
     const r=this.r,w=r.world,g=r.buildingGroup,x=b.x-w.width/2+.5,z=b.y-w.height/2+.5,h=tileHeight(w,b.x,b.y);
-    const [wallColor,roofColor,trimColor]=MATERIAL_PALETTES[b.material??'wood'],race=b.race??'human';
-    const wall=this.mat(wallColor),roof=this.mat(roofColor),trim=this.mat(trimColor,b.material==='crystal'),dark=this.mat('#354653'),accent=this.mat(RACES[race].color,race==='alien');
-    const local=new THREE.Group();local.position.set(x,h,z);local.scale.setScalar((b.type==='hall'?1.22:1)*BUILDING);g.add(local);
+    const village=w.villages.find(v=>v.id===b.villageId);
+    const epoch=epochOf(village?.population??0);
+    const setting=b.setting??'meadow',[tint,amount]=SITE_TINT[setting]??SITE_TINT.meadow;
+    const shade=hex=>amount?hexMix(hex,tint,amount):hex;
+    const [wallColor,roofColor,trimColor]=MATERIAL_PALETTES[b.material??'wood'].map(shade),race=b.race??'human';
+    const roofHex=setting==='frost'?hexMix(roofColor,'#eef6f8',.55):roofColor;
+    const wall=this.mat(wallColor),roof=this.mat(roofHex),trim=this.mat(trimColor,b.material==='crystal'||setting==='frost'),dark=this.mat('#2c3c48'),accent=this.mat(RACES[race].color,race==='alien'? .45 : race==='ghoul' ? .18 : race==='dwarf' ? .12 : 0);
+    const glass=this.mat(WINDOW_LIGHT[race]??WINDOW_LIGHT.human,.85);
+    const noise=scatter(b.id),variant=Number.isInteger(b.variant)?b.variant:noise%3;
+    const local=new THREE.Group();local.position.set(x,h,z);
+    const size=b.type==='house'?1+(((noise>>4)%9)-4)*.012:1;
+    local.scale.setScalar((b.type==='hall'?1.18:1)*BUILDING*epoch.scale*size);g.add(local);
+    if(b.type==='house')local.rotation.y=(((noise>>12)%9)-4)*.05;
     const box=(mat,dx,dy,dz,sx,sy,sz)=>r.addBox(local,mat,dx,dy,dz,sx,sy,sz);
     const mesh=(geo,mat,dx,dy,dz,sx=1,sy=1,sz=1)=>{const m=new THREE.Mesh(geo,mat);m.position.set(dx,dy,dz);m.scale.set(sx,sy,sz);m.castShadow=true;m.receiveShadow=true;local.add(m);return m;};
-    const s=1;
-    if(b.type==='farm'&&b.complete){box(this.mat('#806949'),0,.12,0,2.7,.22,2.4);for(let n=0;n<5;n++){
-      if(race==='mycelite')mesh(new THREE.SphereGeometry(.45,8,4,0,Math.PI*2,0,Math.PI/2),accent,-1+n*.5,.5,(n%2-.5)*.8,1,.7,1);
-      else box(this.mat('#d9c074'),-1+n*.5,.25+Math.min(1,b.crop/12)*.28,0,.18,.2+Math.min(1,b.crop/12)*.4,2);
-    }return;}
-    box(dark,0,.08,0,2.5*s,.16,2.3*s);
-    if(!b.complete){
-      const p=Math.max(.08,b.progress),levels=Math.max(1,Math.ceil(p*5));
-      for(let n=0;n<levels;n++)box(wall,0,.2+n*.35,0,1.9*s,.27,1.7*s);
-      for(const dx of [-1.2,1.2])for(const dz of [-1.1,1.1])box(this.mat('#a4865d'),dx,1.2,dz,.09,2.4,.09);
-      box(trim,0,2.2,1.1,2.5,.1,.1);box(dark,0,.25,1.4,2,.1,.16);box(accent,-1+b.progress,.31,1.4,2*b.progress,.12,.17);
-      for(let n=0;n<3;n++)box(wall,1.55,.15+n*.16,-.6,.55,.15,.4);return;
+    const gable=(mat,y,radius,height)=>{const top=mesh(new THREE.ConeGeometry(radius,height,4),mat,0,y,0);top.rotation.y=Math.PI/4;return top;};
+    const storeys=b.type==='hall'?Math.min(6,epoch.levels+1):Math.min(5,epoch.levels);
+    const storeyH=.42, bodyW=epoch.id==='camp'?1.65:epoch.id==='hamlet'?1.85:2.05, bodyD=bodyW*.86;
+    const bodyTop=.28+storeys*storeyH;
+    const dress=()=>{
+      if(setting==='coast')for(const dx of [-bodyW*.42,bodyW*.42])for(const dz of [-bodyD*.4,bodyD*.4])box(this.mat('#5c4a38'),dx,.28,dz,.12,.7,.12);
+      if(setting==='forest'){for(const n of [-.7,.7])box(this.mat('#6a4e32'),n*.9,.22,bodyD*.55,.28,.28,.7);box(this.mat('#4f6a42'),bodyW*.55,.16,-.35,.4,.18,.45);}
+      if(setting==='sand')for(const n of [-1,1])box(this.mat('#c9a66a'),n*1.15,.14,0,.65,.18,bodyD+.15);
+      if(setting==='highland'){box(this.mat('#7a868c'),0,.1,0,bodyW+.65,.18,bodyD+.55);for(const dx of [-bodyW*.4,bodyW*.4])box(this.mat('#8a9498'),dx,.42,-bodyD*.48,.18,.55,.18);}
+      if(setting==='frost'){for(const dx of [-.7,0,.7])mesh(new THREE.ConeGeometry(.1,.45,5),this.mat('#e8f2f6',true),dx,bodyTop+.85,bodyD*.2);box(this.mat('#eef6f8',true),0,bodyTop+.08,0,bodyW*.7,.08,bodyD*.7);}
+      if(setting==='waste')for(const n of [-1,1])box(this.mat('#6a5a48'),n*1.1,.2,.8,.32,.32,.26);
+      if(setting==='meadow')for(const n of [-1,1])box(this.mat('#6f8a4a'),n*bodyW*.55,.14,bodyD*.55,.28,.16,.22);
+    };
+    if(b.type==='pen'){
+      const post=this.mat('#5c4a38'),rail=this.mat('#8d7352'),yard=this.mat(YARD[setting]??YARD.meadow);
+      box(yard,0,.07,0,3.6,.14,3.4);
+      for(const dx of [-1.55,-.52,.52,1.55])for(const dz of [-1.45,1.45])box(post,dx,.55,dz,.12,1.05,.12);
+      for(const dz of [-1.45,1.45])box(rail,0,.62,dz,3.2,.08,.08);
+      for(const dx of [-1.55,1.55])box(rail,dx,.62,0,.08,.08,2.9);
+      if(!b.complete){box(this.mat('#daf09e'),-1.5+b.progress*1.5,.16,1.7,3*b.progress,.1,.16);return local;}
+      if(race==='alien'){mesh(new THREE.CylinderGeometry(.55,.7,.9,10),wall,-1.15,.5,-1.05);mesh(new THREE.SphereGeometry(.7,10,6,0,Math.PI*2,0,Math.PI/2),accent,-1.15,.9,-1.05,1,.45,1);}
+      else if(race==='mycelite'){mesh(new THREE.CylinderGeometry(.22,.32,.7,6),wall,-1.15,.4,-1.05);mesh(new THREE.SphereGeometry(.7,10,6,0,Math.PI*2,0,Math.PI/2),accent,-1.15,.75,-1.05,1,.5,1);}
+      else if(race==='ghoul'){box(wall,-1.15,.58,-1.05,1.2,1.15,1.05);gable(roof,.58+1.15+.55,.85,.95);mesh(new THREE.ConeGeometry(.14,.7,5),accent,-.55,1.5,-1.05);}
+      else if(race==='dwarf'){box(wall,-1.15,.5,-1.05,1.2,.9,1.1);box(trim,-1.15,1.02,-1.05,1.4,.18,1.25);box(dark,-1.15,1.35,-1.05,.16,.55,.16);}
+      else {box(wall,-1.15,.58,-1.05,1.35,1.05,1.2);gable(roof,.58+1.05+.42,.95,.7);}
+      box(dark,-1.15,.42,-.42,.45,.7,.08);
+      box(this.mat('#8a6a45'),.85,.22,.35,1.2,.22,.4);
+      box(this.mat('#c9b36a'),.85,.38,.35,.9,.12,.22);
+      if(setting==='coast')for(const dx of [-1.5,1.5])box(post,dx,.35,0,.12,.7,.12);
+      if(setting==='frost')box(this.mat('#e8f2f6'),.85,.46,.35,.9,.08,.22);
+      return local;
     }
-    if(race==='human') {
-      if(b.material==='wood'){
-        for(let level=0;level<5;level++){box(wall,0,.35+level*.3,0,2.1*s,.26,1.75*s);box(roof,-.85*s,.35+level*.3,.87*s,.2,.2,.12);}
-        const top=mesh(new THREE.ConeGeometry(1.8*s,1.2*s,4),roof,0,2.25*s,0);top.rotation.y=Math.PI/4;
-      } else if(b.material==='clay'){
-        mesh(new THREE.CylinderGeometry(1*s,1.12*s,1.8*s,8),wall,0,.95*s,0);
-        mesh(new THREE.SphereGeometry(1.2*s,10,6,0,Math.PI*2,0,Math.PI/2),roof,0,1.8*s,0,1,.5,1);
-      } else {
-        box(wall,0,1*s,0,2.1*s,1.8*s,1.9*s);box(roof,0,2.05*s,0,2.3*s,.25,2.1*s);
-        for(const dx of [-.95,.95])for(const dz of [-.85,.85])box(trim,dx*s,2.3*s,dz*s,.32,.5,.32);
-        for(let n=0;n<3;n++)box(roof,0,.5+n*.5,.96*s,2.1*s,.045,.045);
+    if(b.type==='farm'&&b.complete){
+      box(this.mat(SOIL[setting]??SOIL.meadow),0,.12,0,2.7,.22,2.4);
+      for(let n=0;n<5;n++){
+        const px=-1+n*.5,pz=(n%2-.5)*.8,grown=Math.min(1,b.crop/12);
+        if(race==='mycelite')mesh(new THREE.SphereGeometry(.45,8,4,0,Math.PI*2,0,Math.PI/2),accent,px,.5,pz,1,.7,1);
+        else if(race==='alien')mesh(new THREE.ConeGeometry(.12,.28+grown*.45,5),this.mat('#91efe7',true),px,.22+grown*.2,0);
+        else if(race==='ghoul')box(this.mat('#6a4a52'),px,.22+grown*.2,0,.14,.18+grown*.32,1.6);
+        else if(race==='dwarf')box(this.mat('#7a868c'),px,.16+grown*.12,0,.22,.12+grown*.2,1.7);
+        else if(setting==='frost')box(this.mat('#c9d6b0'),px,.2+grown*.18,0,.16,.16+grown*.28,1.8);
+        else if(setting==='coast')box(this.mat('#93b167'),px,.18+grown*.16,0,.2,.14+grown*.22,1.9);
+        else box(this.mat('#d9c074'),px,.25+grown*.28,0,.18,.2+grown*.4,2);
       }
-      box(dark,0,.5,.99*s,.47,1,.07);box(trim,-.58*s,1.15,.99*s,.35,.42,.07);box(trim,.58*s,1.15,.99*s,.35,.42,.07);
-    } else if(race==='ghoul') {
-      box(wall,0,1.2*s,0,1.8*s,2.3*s,1.65*s);
-      const roofMesh=mesh(new THREE.ConeGeometry(1.55*s,1.9*s,4),roof,0,3.05*s,0);roofMesh.rotation.y=Math.PI/4;
-      for(const dx of [-.65,.65]){box(dark,dx*s,1.3*s,.86*s,.18,2.2*s,.06);box(accent,dx*s,1.9*s,.9*s,.12,.45,.06);}
-      box(dark,0,.7,.88*s,.45,1.4,.08);box(accent,0,2.4*s,.9*s,1.45*s,.08,.1);
-      for(const dx of [-1.15,1.15])mesh(new THREE.ConeGeometry(.18,1.2,5),accent,dx,1.8,-.3);
-    } else if(race==='alien') {
-      mesh(new THREE.CylinderGeometry(1.2*s,1.35*s,.5,12),dark,0,.3,0);
-      mesh(new THREE.SphereGeometry(1.3*s,12,8,0,Math.PI*2,0,Math.PI/2),wall,0,.5,0,1,1.2,1);
-      const ring=mesh(new THREE.TorusGeometry(1.24*s,.07,5,18),accent,0,.7,0);ring.rotation.x=Math.PI/2;
-      mesh(new THREE.ConeGeometry(.32,1.4,5),trim,0,2.25*s,0);
-      for(let i=0;i<3;i++){const a=i/3*Math.PI*2;box(dark,Math.cos(a)*1.3,.9,Math.sin(a)*1.3,.24,1.4,.24);mesh(new THREE.SphereGeometry(.15,6,4),accent,Math.cos(a)*1.3,1.7,Math.sin(a)*1.3);}
-      box(dark,0,.6,1.17*s,.55,.9,.13);box(accent,0,1.05,1.25*s,.55,.07,.07);
-    } else {
-      mesh(new THREE.CylinderGeometry(.75*s,1.0*s,1.9*s,8),wall,0,1*s,0);
-      mesh(new THREE.SphereGeometry(1.6*s,12,7,0,Math.PI*2,0,Math.PI/2),roof,0,1.9*s,0,1,.6,1);
-      for(let i=0;i<7;i++){const a=i*2.4;mesh(new THREE.SphereGeometry(.16,6,4),trim,Math.cos(a)*.95*s,2.6*s,Math.sin(a)*.8*s,1,.2,1);}
-      box(dark,0,.55,.92*s,.45,1.05,.1);mesh(new THREE.SphereGeometry(.18,8,5),accent,.5,1.3,.73*s,1,1,.3);
-      for(const sign of [-1,1]){mesh(new THREE.CylinderGeometry(.12,.22,.65,5),wall,sign*1.25,.3,.6);mesh(new THREE.SphereGeometry(.45,8,4,0,Math.PI*2,0,Math.PI/2),accent,sign*1.25,.65,.6,1,.6,1);}
+      if(setting==='highland')box(this.mat('#7a868c'),0,.06,1.3,2.7,.18,.22);
+      return local;
     }
-    if(b.material==='crystal')for(const dx of [-1.1,1.1])mesh(new THREE.ConeGeometry(.23,1,5),trim,dx,.5,1.1);
-    if(b.material==='iron')for(const dx of [-1,1])box(this.mat('#d4a37d'),dx,.8,1, .1,1.5,.1);
-    if(b.material==='stone')for(let i=0;i<4;i++)box(trim,-.9+i*.6,.23,1.1,.5,.26,.3);
-    if(b.material==='mycelium')for(let i=0;i<4;i++)mesh(new THREE.SphereGeometry(.1,6,4),accent,-.7+i*.45,.3,1.1);
-    if(b.type==='hall'){box(dark,1.1,2.8,-.6,.07,2.8,.07);box(accent,1.5,3.9,-.6,.85,.45,.05);}
+    box(dark,0,.08,0,bodyW+.4,.16,bodyD+.4);
+    if(!b.complete){
+      const p=Math.max(.08,b.progress),shown=Math.max(1,Math.ceil(p*storeys));
+      for(let n=0;n<shown;n++)box(wall,0,.28+n*storeyH,0,bodyW,.32,bodyD);
+      for(const dx of [-1.15,1.15])for(const dz of [-1.05,1.05])box(this.mat('#a4865d'),dx,1.15,dz,.09,2.2,.09);
+      box(trim,0,2.1,1.05,2.4,.1,.1);box(dark,0,.25,1.35,1.9,.1,.16);box(accent,-1+b.progress,.31,1.35,2*b.progress,.12,.17);
+      return local;
+    }
+    const kit=houseKit(
+      (geo,material,dx,dy,dz,sx,sy,sz)=>geo?mesh(geo,material,dx,dy,dz,sx,sy,sz):box(material,dx,dy,dz,sx,sy,sz),
+      {wall,roof,trim,dark,accent,glass,mat:(color,glow)=>this.mat(color,glow)},
+      {race,setting,material:b.material??'wood',epoch,variant,storeys,storeyH,bodyW,bodyD,bodyTop,hall:b.type==='hall'},
+    );
+    buildHouse(kit,houseForm(race,setting,epoch,b.material??'wood'));
+    if(b.material==='crystal')for(const dx of [-1,1])mesh(new THREE.ConeGeometry(.2,.9,5),trim,dx,.45,1);
+    if(b.material==='iron')for(const dx of [-.9,.9])box(this.mat('#d4a37d'),dx,.75,.95,.08,1.35,.08);
+    if(b.material==='stone')for(let i=0;i<4;i++)box(trim,-.85+i*.55,.22,1.05,.45,.22,.26);
+    if(b.material==='mycelium')for(let i=0;i<4;i++)mesh(new THREE.SphereGeometry(.1,6,4),accent,-.65+i*.42,.28,1.05);
+    dress();
+    if(b.type==='hall'){
+      box(dark,bodyW*.52,bodyTop+1.1,-.45,.07,2.4,.07);box(accent,bodyW*.7,bodyTop+2.2,-.45,.75,.4,.05);
+      mesh(new THREE.SphereGeometry(.12,8,6),this.mat(WINDOW_LIGHT[race]??WINDOW_LIGHT.human,.7),-bodyW*.45,bodyTop+.35,bodyD*.48);
+    }
+    return local;
   }
   update(time) {
     const r=this.r,w=r.world;let rocks=0,crystals=0,mushrooms=0,stems=0,fish=0,particles=0;
@@ -98,10 +168,10 @@ export class Scenery3D {
       }
     }
     for(const e of w.effects) {
-      if(!['gather','deliver','birth','death','complete','hit','fell','steal','scout','border','war','siege','cheer'].includes(e.kind))continue;
+      if(!['gather','deliver','birth','death','complete','hit','fell','steal','scout','border','war','siege','cheer','festival','family'].includes(e.kind))continue;
       const t=1-e.life/e.total,x=e.x-w.width/2,z=e.y-w.height/2,h=tileHeight(w,e.x,e.y);
-      const color=e.kind==='scout'?'#7ee0d8':e.kind==='border'?'#ffb078':e.kind==='steal'||e.kind==='siege'||e.kind==='war'?'#f08a8a':e.kind==='cheer'?(RESOURCES[e.resource]?.color??'#ffe08a'):RESOURCES[e.resource]?.color??RACES[e.race??'human'].color;
-      const burst=e.kind==='complete'?24:e.kind==='scout'?16:e.kind==='war'||e.kind==='siege'?20:e.kind==='cheer'?18:10;
+      const color=e.kind==='scout'?'#7ee0d8':e.kind==='border'?'#ffb078':e.kind==='steal'||e.kind==='siege'||e.kind==='war'?'#f08a8a':e.kind==='festival'?'#ffe08a':e.kind==='family'?'#f0b8d0':e.kind==='cheer'?(RESOURCES[e.resource]?.color??'#ffe08a'):RESOURCES[e.resource]?.color??RACES[e.race??'human'].color;
+      const burst=e.kind==='complete'?24:e.kind==='scout'?16:e.kind==='war'||e.kind==='siege'?20:e.kind==='festival'?22:e.kind==='cheer'?18:10;
       for(let n=0;n<burst;n++){
         const a=n*2.4,spread=(e.kind==='complete'?2:e.kind==='scout'?1.4:1)*t;
         const py=e.kind==='death'?t*2:e.kind==='scout'?t*2.4:e.kind==='cheer'?1.4+t*1.6:Math.sin(t*Math.PI)*(1+n%3*.3);
@@ -111,5 +181,5 @@ export class Scenery3D {
     }
     for(const [mesh,count]of[[this.rocks,rocks],[this.crystals,crystals],[this.mushrooms,mushrooms],[this.stems,stems],[this.fish,fish],[this.particles,particles]])r.finishInstances(mesh,count);
   }
-  dispose(){for(const material of this.palette.values())material.dispose();}
+  dispose(){for(const material of this.palette.values())material.dispose();disposeHouseGeometry();}
 }

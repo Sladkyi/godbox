@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { World, TILE } from '../src/world.js';
+import { World, TILE, UNIT_LIMIT } from '../src/world.js';
+import { epochOf, SETTINGS, structureName } from '../src/civilizations.js';
 
 test('a seed reproduces terrain, settlers and buildings', () => {
   const a = new World({ seed: 808 }), b = new World({ seed: 808 });
@@ -69,6 +70,29 @@ test('sheep flee wolves and wolves close in on sheep', () => {
   assert.ok(wolf.x < 12.5);
 });
 
+test('cows flee wolves the same way sheep do', () => {
+  const world = new World({ width: 48, height: 48, preset: 'ocean', populate: false });
+  world.tiles.fill(TILE.GRASS); world.navRevision++;
+  const cow = world.spawn('cow', 10.5, 10.5), wolf = world.spawn('wolf', 12.5, 10.5);
+  world.humans.prepare();
+  for (let i = 0; i < 6; i++) world.tick(.1);
+  assert.equal(cow.action, 'flee');
+  assert.ok(cow.x < 10.5);
+});
+
+test('folds and cows survive a save', () => {
+  const world = new World({ width: 48, height: 48, preset: 'ocean', populate: false });
+  world.tiles.fill(TILE.GRASS); world.navRevision++;
+  const v = world.createVillage(20, 20, true);
+  const pen = world.addBuilding(v, 'pen', true);
+  assert.ok(pen);
+  const cow = world.spawn('cow', 21.5, 21.5, v.id);
+  cow.penId = pen.id;
+  const copy = World.deserialize(world.serialize());
+  assert.ok(copy.buildings.some(b => b.type === 'pen'));
+  assert.ok(copy.units.some(u => u.kind === 'cow' && u.penId === pen.id && u.villageId === v.id));
+});
+
 test('save restores a progressed world and deterministically continues the simulation', () => {
   const a = new World({ seed: 333 });
   for (let i = 0; i < 500; i++) a.tick(.1);
@@ -87,13 +111,31 @@ test('malformed saves are rejected before replacing the active world', () => {
   assert.throws(() => World.deserialize('invalid'));
 });
 
-test('long simulation respects entity cap and terrain boundaries', () => {
+test('long simulation stays on land and under the save size', () => {
   const world = new World({ seed: 445 });
   for (let i = 0; i < 6000; i++) world.tick(.1);
-  assert.ok(world.units.length <= 500);
+  assert.ok(world.units.length <= UNIT_LIMIT);
   assert.ok(world.units.every(u => world.walkable(u.x, u.y) && Number.isFinite(u.hp)));
   assert.ok(world.villages.every(v => v.food >= 0 && v.wood >= 0));
   assert.ok(Buffer.byteLength(world.serialize()) < 950000);
+});
+
+test('towns grow past the old radius and change roof-stage with population', () => {
+  const world = new World({ width: 96, height: 96, preset: 'ocean', populate: false });
+  world.tiles.fill(TILE.GRASS); world.navRevision++;
+  const v = world.createVillage(48, 48, false, 'human');
+  assert.equal(epochOf(0).id, 'camp');
+  assert.equal(epochOf(8).id, 'hamlet');
+  assert.equal(epochOf(80).id, 'city');
+  let added = 0;
+  while (added < 320 && world.addBuilding(v, 'house')) added++;
+  assert.ok(added >= 200);
+  const far = world.buildings.reduce((m, b) => Math.max(m, Math.hypot(b.x - 48, b.y - 48)), 0);
+  assert.ok(far > 26);
+  for (let i = 0; i < 12; i++) world.spawn('human', 48.5, 48.5, v.id);
+  world.updatePopulations();
+  assert.equal(v.epoch, 'hamlet');
+  assert.ok(world.events.some(e => e.type === 'epoch' && e.message.includes(v.name)));
 });
 
 test('houses sit on a spiral and never share a cell', () => {
@@ -126,4 +168,37 @@ test('a crowd on one tile founds separate towns instead of stacking halls', () =
   const inside = world.ownerAt(world.villages[0].x, world.villages[0].y);
   assert.equal(inside?.id, world.villages[0].id);
   assert.equal(world.ownerAt(2, 2), null);
+});
+
+test('houses remember the ground they were raised on', () => {
+  const world = new World({ width: 48, height: 48, preset: 'ocean', populate: false });
+  world.tiles.fill(TILE.GRASS); world.navRevision++;
+  world.paint('forest', 24, 24, 8);
+  const v = world.createVillage(24, 24, true, 'human');
+  const hall = world.buildings.find(b => b.type === 'hall');
+  assert.equal(hall.setting, 'forest');
+  const copy = World.deserialize(world.serialize());
+  assert.equal(copy.buildings.find(b => b.type === 'hall').setting, 'forest');
+});
+
+test('a shore village raises coastal houses', () => {
+  const world = new World({ width: 48, height: 48, preset: 'ocean', populate: false });
+  world.tiles.fill(TILE.GRASS);
+  for (let y = 0; y < 48; y++) for (let x = 0; x < 24; x++) world.tiles[world.index(x, y)] = TILE.WATER;
+  world.navRevision++;
+  const v = world.createVillage(25, 24, true, 'human');
+  assert.ok(v);
+  const house = world.buildings.find(b => b.type === 'house');
+  assert.equal(house.setting, 'coast');
+  assert.equal(structureName(house, v), 'Beach hut · Wood');
+});
+
+test('old buildings without setting pick up the land around them', () => {
+  const world = new World({ width: 48, height: 48, preset: 'ocean', populate: false });
+  world.tiles.fill(TILE.GRASS); world.navRevision++;
+  world.createVillage(20, 20, true);
+  const data = JSON.parse(world.serialize());
+  for (const b of data.buildings) delete b.setting;
+  const copy = World.deserialize(JSON.stringify(data));
+  assert.ok(copy.buildings.every(b => SETTINGS.includes(b.setting)));
 });

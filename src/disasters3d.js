@@ -18,22 +18,24 @@ export class Disasters3D {
     this.rockMat=new THREE.MeshStandardMaterial({color:0x4c3a32,emissive:0xff5a1a,emissiveIntensity:.9,roughness:.72,flatShading:true});
     this.coreMat=new THREE.MeshBasicMaterial({color:0xfff4c8,transparent:true,opacity:.9,blending:add,depthWrite:false});
     this.ringMat=new THREE.MeshBasicMaterial({color:0xffe7b0,transparent:true,opacity:.8,blending:add,depthWrite:false,side:THREE.DoubleSide});
-    this.glows=r.instances(new THREE.SphereGeometry(1,10,8),this.glowMat,80,false,this.group);
-    this.embers=r.instances(new THREE.SphereGeometry(.12,6,4),this.emberMat,2200,false,this.group);
-    this.smoke=r.instances(new THREE.SphereGeometry(.7,7,5),this.smokeMat,900,false,this.group);
+    this.dropMat=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.62,depthWrite:false});
+    this.flakeMat=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.9,depthWrite:false});
+    this.sheetMat=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.28,blending:add,depthWrite:false,side:THREE.DoubleSide});
+    this.glows=r.instances(new THREE.SphereGeometry(1,10,8),this.glowMat,140,false,this.group);
+    this.embers=r.instances(new THREE.SphereGeometry(.12,6,4),this.emberMat,2800,false,this.group);
+    this.smoke=r.instances(new THREE.SphereGeometry(.7,7,5),this.smokeMat,1100,false,this.group);
     this.rocks=r.instances(new THREE.IcosahedronGeometry(.55,0),this.rockMat,48,true,this.group);
     this.cores=r.instances(new THREE.SphereGeometry(.45,8,6),this.coreMat,36,false,this.group);
-    this.rings=r.instances(new THREE.RingGeometry(.55,1,40),this.ringMat,36,false,this.group);
+    this.rings=r.instances(new THREE.RingGeometry(.55,1,40),this.ringMat,72,false,this.group);
     this.wisps=r.instances(new THREE.ConeGeometry(.22,1.4,5),new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.55,blending:add,depthWrite:false}),1800,false,this.group);
-    for(const mesh of [this.glows,this.embers,this.smoke,this.rocks,this.cores,this.rings,this.wisps])mesh.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(mesh.instanceMatrix.count*3),3);
+    this.drops=r.instances(new THREE.BoxGeometry(.04,1,.04),this.dropMat,4800,false,this.group);
+    this.flakes=r.instances(new THREE.BoxGeometry(.18,.035,.18),this.flakeMat,3200,false,this.group);
+    this.sheets=r.instances(new THREE.PlaneGeometry(1,1),this.sheetMat,48,false,this.group);
+    for(const mesh of [this.glows,this.embers,this.smoke,this.rocks,this.cores,this.rings,this.wisps,this.drops,this.flakes,this.sheets])mesh.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(mesh.instanceMatrix.count*3),3);
     this.boltPoints=new Float32Array(900*6);
     this.boltGeo=new THREE.BufferGeometry();this.boltGeo.setAttribute('position',new THREE.BufferAttribute(this.boltPoints,3));
     this.bolts=new THREE.LineSegments(this.boltGeo,new THREE.LineBasicMaterial({color:0xf4fbff,transparent:true,opacity:1,blending:add,depthWrite:false}));
     this.bolts.frustumCulled=false;this.bolts.renderOrder=30;this.group.add(this.bolts);
-    this.rainPoints=new Float32Array(900*6);
-    this.rainGeo=new THREE.BufferGeometry();this.rainGeo.setAttribute('position',new THREE.BufferAttribute(this.rainPoints,3));
-    this.rain=new THREE.LineSegments(this.rainGeo,new THREE.LineBasicMaterial({color:0xc5eefe,transparent:true,opacity:.72,blending:add,depthWrite:false}));
-    this.rain.frustumCulled=false;this.group.add(this.rain);
     this.light=new THREE.PointLight(0xffe0a8,0,90,1.7);this.group.add(this.light);
   }
   place(mesh,i,x,y,z,sx,sy,sz,rx,ry,rz,color) {
@@ -42,7 +44,7 @@ export class Disasters3D {
     mesh.setMatrixAt(i,this.obj.matrix);if(color!=null)mesh.setColorAt(i,this.color.set(color));return i+1;
   }
   finish() {
-    for(const mesh of [this.glows,this.embers,this.smoke,this.rocks,this.cores,this.rings,this.wisps])this.r.finishInstances(mesh,Math.min(this.counts.get(mesh)??0,mesh.instanceMatrix.count));
+    for(const mesh of [this.glows,this.embers,this.smoke,this.rocks,this.cores,this.rings,this.wisps,this.drops,this.flakes,this.sheets])this.r.finishInstances(mesh,Math.min(this.counts.get(mesh)??0,mesh.instanceMatrix.count));
   }
   count(mesh) { return this.counts.get(mesh)??0; }
   bump(mesh) { const n=this.count(mesh); this.counts.set(mesh,n+1); return n; }
@@ -50,7 +52,7 @@ export class Disasters3D {
     const now=performance.now(),wall=this.lastTime?Math.min(.05,(now-this.lastTime)/1000):.016;this.lastTime=now;
     this.syncClips(wall);
     const w=this.r.world;this.counts=new Map();this.flash=Math.max(0,this.flash-wall*2.4);this.shake=Math.max(0,this.shake-wall*3.2);
-    let bolts=0,rain=0,light=0,lightColor=0xffe6b0,lx=0,ly=8,lz=0;
+    let bolts=0,light=0,lightColor=0xffe6b0,lx=0,ly=8,lz=0;
     this.fireField(clock);
     for(const e of this.clips) {
       const p=Math.min(1,e.t/e.duration),x=e.x-w.width/2,z=e.y-w.height/2,h=tileHeight(w,e.x,e.y);
@@ -99,17 +101,26 @@ export class Disasters3D {
         const burst=Math.max(0,1-Math.abs(p-.12)*10);
         light+=burst*70+alive*6;lightColor=0xdef2ff;lx=x;ly=h+6;lz=z;
         if(burst>.35){this.flash=Math.max(this.flash,burst*.85);this.shake=Math.max(this.shake,burst*.55);}
-      } else if(e.kind==='rain') {
-        for(let n=0;n<90&&rain<900;n++) {
-          const seed=hash(Math.floor(e.x*9)+n*17),spin=n*2.07+clock*1.4;
-          const px=x+Math.sin(spin)*e.radius*(.2+seed),pz=z+Math.cos(spin*.83)*e.radius*(.25+hash(n+3));
-          const fall=((n*.31+p*11+seed*4)%7);
-          const py=h+7.5-fall,len=.85+seed*.5;
-          this.rainPoints.set([px,py,pz,px-.05,py-len,pz+.04],rain++*6);
-          if(fall>6.2)this.place(this.rings,this.bump(this.rings),px,h+.16,pz,.25+p*.2,.25+p*.2,.25+p*.2,-Math.PI/2,0,0,0xb7e7f4);
-        }
-        this.place(this.glows,this.bump(this.glows),x,h+4,z,e.radius*1.1,2.4,e.radius*1.1,0,0,0,0x7fb8c8);
-        light+=1.4;lightColor=0xa6d4e6;lx=x;ly=h+8;lz=z;
+      } else if(e.kind==='rain'||e.kind==='storm') {
+        this.drawRain(x,z,h,e.radius,clock,p,e.kind==='storm',e.x);
+        if(e.kind==='storm'&&p<.4) {
+          const burst=Math.max(0,1-Math.abs(p-.12)*9);
+          bolts=this.drawBolt(bolts,x+(hash(e.x)-.5)*e.radius*.4,h+34,z,x,h+.2,z,8,1.2,e.x+clock,1-p);
+          light+=burst*36+4;lightColor=0xd8eef8;lx=x;ly=h+8;lz=z;
+          if(burst>.45){this.flash=Math.max(this.flash,burst*.5);this.shake=Math.max(this.shake,burst*.35);}
+        } else if(light<2){light+=e.kind==='storm'?1.4:.7;lightColor=e.kind==='storm'?0x8fb4c8:0xa6d4e6;lx=x;ly=h+8;lz=z;}
+      } else if(e.kind==='blizzard') {
+        this.drawSnow(x,z,h,e.radius,clock,p,e.x);
+        if(light<2){light+=.8;lightColor=0xcfe4f0;lx=x;ly=h+7;lz=z;}
+      } else if(e.kind==='aurora') {
+        this.drawAurora(x,z,h,e.radius,clock,e.x);
+        if(light<3){light+=2.6;lightColor=0xa8fff0;lx=x;ly=h+10;lz=z;}
+      } else if(e.kind==='bloom') {
+        this.drawBloom(x,z,h,e.radius,clock,p,e.y);
+        if(light<2){light+=1.2;lightColor=0xe8f6b0;lx=x;ly=h+4;lz=z;}
+      } else if(e.kind==='drought') {
+        this.drawDrought(x,z,h,e.radius,clock,e.x);
+        if(light<1){light+=.5;lightColor=0xe0c080;lx=x;ly=h+5;lz=z;}
       } else if(e.kind==='ignite') {
         const puff=easeOut(p);
         for(let n=0;n<16;n++) {
@@ -124,14 +135,98 @@ export class Disasters3D {
         this.place(this.rings,this.bump(this.rings),x,h+.2,z,.8+puff*2.2,.8+puff*2.2,.8+puff*2.2,-Math.PI/2,0,0,0xc8acec);
       }
     }
+    const field=this.weatherField(clock,bolts,light,lightColor,lx,ly,lz);
+    bolts=field.bolts;light=field.light;lightColor=field.lightColor;lx=field.lx;ly=field.ly;lz=field.lz;
     this.light.position.set(lx,ly,lz);this.light.intensity=light;this.light.color.setHex(lightColor);
     this.light.distance=light>20?110:70;
     this.bolts.visible=bolts>0;this.boltGeo.setDrawRange(0,bolts*2);this.boltGeo.attributes.position.needsUpdate=true;
-    this.rain.visible=rain>0;this.rainGeo.setDrawRange(0,rain*2);this.rainGeo.attributes.position.needsUpdate=true;
     this.finish();
   }
+  scatter(seed,n,radius) {
+    const u=hash(seed+n*17),v=hash(seed+n*31+9);
+    const a=u*Math.PI*2,r=Math.sqrt(v)*radius;
+    return [Math.cos(a)*r,Math.sin(a)*r,u];
+  }
+  drawRain(x,z,h,radius,clock,p,storm,seed=0) {
+    const count=storm?420:300,slant=storm?.52:.14,fallSpan=storm?10:8.2,lenBase=storm?1.55:1.05,speed=storm?11:7;
+    for(let n=0;n<count;n++) {
+      const [dx,dz,s]=this.scatter(Math.floor(seed*11),n,radius);
+      const drift=clock*(storm?1.6:.32);
+      const fall=(n*.37+p*10+s*5+clock*speed)%fallSpan;
+      const px=x+dx+drift,pz=z+dz+drift*.35,py=h+9.2-fall,len=lenBase+s*.7;
+      this.place(this.drops,this.bump(this.drops),px,py,pz,storm?1.15:.9,len,storm?1.15:.9,slant,0,0,storm?0x8fb4c6:0xb4deee);
+    }
+    for(let n=0;n<6;n++) {
+      const [dx,dz,s]=this.scatter(seed+40,n,radius*.85);
+      this.place(this.smoke,this.bump(this.smoke),x+dx,h+.28+s*.12,z+dz,2.6,.16,2.6,0,0,0,storm?0x4e6874:0x7a9aa8);
+    }
+  }
+  drawSnow(x,z,h,radius,clock,p,seed=0) {
+    for(let n=0;n<260;n++) {
+      const [dx,dz,s]=this.scatter(Math.floor(seed*7)+n,n,radius);
+      const sway=Math.sin(clock*.9+n)*.55,fall=(n*.28+clock*2.4+s*8)%11;
+      const px=x+dx+sway+clock*.35,pz=z+dz+Math.cos(clock*.7+n)*.4,py=h+10-fall;
+      const spin=clock*1.4+n,size=.55+s*.7;
+      this.place(this.flakes,this.bump(this.flakes),px,py,pz,size,.7+s,size,spin,spin*.6,0,n%4?0xeef6fb:0xd5e6f0);
+    }
+    for(let n=0;n<5;n++) {
+      const [dx,dz]=this.scatter(seed+90,n,radius*.7);
+      this.place(this.smoke,this.bump(this.smoke),x+dx,h+.22,z+dz,2.8,.14,2.8,0,0,0,0xc5d6e0);
+    }
+  }
+  drawAurora(x,z,h,radius,clock,seed=0) {
+    for(let n=0;n<8;n++) {
+      const a=n*.79+clock*.12,px=x+Math.sin(a)*radius*.62,pz=z+Math.cos(a*.72)*radius*.5;
+      const hue=n%3===0?0x7a6cff:n%2?0x4ee8c4:0xc8a0ff;
+      const hgt=8.5+Math.sin(clock*.65+n)*2.6;
+      this.place(this.sheets,this.bump(this.sheets),px,h+hgt*.52,pz,radius*.42,hgt,1,0,a,Math.sin(clock*.4+n)*.12,hue);
+      this.place(this.wisps,this.bump(this.wisps),px,h+hgt*.5,pz,.28,hgt, .28,0,a,0,hue);
+    }
+  }
+  drawBloom(x,z,h,radius,clock,p,seed=0) {
+    for(let n=0;n<90;n++) {
+      const [dx,dz,s]=this.scatter(Math.floor(seed*5)+n,n,radius);
+      const rise=(n*.21+clock*1.5+s*4)%5.2;
+      const size=.28+s*.22;
+      this.place(this.flakes,this.bump(this.flakes),x+dx,h+.18+rise,z+dz,size,.5,size,clock+n,n,0,n%3?0xffd98a:0xa8e878);
+    }
+  }
+  drawDrought(x,z,h,radius,clock,seed=0) {
+    for(let n=0;n<8;n++) {
+      const a=n*1.7+clock*.18,s=hash(n*21+seed);
+      this.place(this.smoke,this.bump(this.smoke),x+Math.cos(a)*radius*.55,h+.18+s*.1,z+Math.sin(a)*radius*.55,2.2,.12,2.2,0,0,0,0xc8b080);
+    }
+  }
+  weatherField(clock,bolts,light,lightColor,lx,ly,lz) {
+    const w=this.r.world;
+    for(const field of w.weather??[]) {
+      const x=field.x-w.width/2,z=field.y-w.height/2,h=tileHeight(w,field.x,field.y),p=1-field.life/field.total;
+      if(field.kind==='rain'||field.kind==='storm') {
+        this.drawRain(x,z,h,field.radius,clock,p,field.kind==='storm',field.x+field.y);
+        if(field.kind==='storm'&&hash(Math.floor(clock*3)+field.x)>.82) {
+          const bx=x+(hash(field.y+Math.floor(clock))- .5)*field.radius*.7,bz=z+(hash(field.x)-.5)*field.radius*.7;
+          bolts=this.drawBolt(bolts,bx,h+32,bz,bx,h+.2,bz,7,1.1,clock*8, .85);
+          light+=18;lightColor=0xd4eefe;lx=bx;ly=h+7;lz=bz;
+          this.flash=Math.max(this.flash,.28);this.shake=Math.max(this.shake,.18);
+        } else if(light<2){light+=field.kind==='storm'?1.1:.55;lightColor=field.kind==='storm'?0x8fb4c8:0xa6d4e6;lx=x;ly=h+8;lz=z;}
+      } else if(field.kind==='blizzard') {
+        this.drawSnow(x,z,h,field.radius,clock,p,field.x);
+        if(light<2){light+=.7;lightColor=0xcfe4f0;lx=x;ly=h+6;lz=z;}
+      } else if(field.kind==='aurora') {
+        this.drawAurora(x,z,h,field.radius,clock,field.x);
+        if(light<3){light+=2.4;lightColor=0xb4fff0;lx=x;ly=h+11;lz=z;}
+      } else if(field.kind==='bloom') {
+        this.drawBloom(x,z,h,field.radius,clock,p,field.y);
+        if(light<2){light+=1;lightColor=0xeaf6b4;lx=x;ly=h+3;lz=z;}
+      } else if(field.kind==='drought') {
+        this.drawDrought(x,z,h,field.radius,clock,field.x);
+        if(light<1){light+=.4;lightColor=0xe0c080;lx=x;ly=h+4;lz=z;}
+      }
+    }
+    return {bolts,light,lightColor,lx,ly,lz};
+  }
   syncClips(delta) {
-    const duration={meteor:2.5,lightning:1.65,rain:2.4,ignite:1.2,spore:1.35};
+    const duration={meteor:2.5,lightning:1.65,rain:3.6,storm:3.8,blizzard:3.4,aurora:4.4,bloom:3.6,drought:2.8,ignite:1.2,spore:1.35};
     for(const e of this.r.world.effects) {
       if(!duration[e.kind]||this.seen.has(e.id??`${e.kind}:${e.x}:${e.y}`))continue;
       this.seen.add(e.id??`${e.kind}:${e.x}:${e.y}`);
@@ -172,8 +267,8 @@ export class Disasters3D {
   }
   dispose() {
     this.r.scene.remove(this.group);
-    for(const mesh of [this.glows,this.embers,this.smoke,this.rocks,this.cores,this.rings,this.wisps])mesh.dispose();
-    this.boltGeo.dispose();this.rainGeo.dispose();
-    for(const m of [this.glowMat,this.emberMat,this.smokeMat,this.rockMat,this.coreMat,this.ringMat,this.wisps.material,this.bolts.material,this.rain.material])m.dispose();
+    for(const mesh of [this.glows,this.embers,this.smoke,this.rocks,this.cores,this.rings,this.wisps,this.drops,this.flakes,this.sheets])mesh.dispose();
+    this.boltGeo.dispose();
+    for(const m of [this.glowMat,this.emberMat,this.smokeMat,this.rockMat,this.coreMat,this.ringMat,this.wisps.material,this.bolts.material,this.dropMat,this.flakeMat,this.sheetMat])m.dispose();
   }
 }

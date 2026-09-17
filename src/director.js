@@ -66,11 +66,16 @@ function firePending(world, pending) {
   const other = world.villages.find(v => v.id === pending.otherId) ?? null;
   if (village) village.omen = null;
   if (pending.kind === 'wolves') spawnWolves(world, village);
-  else if (pending.kind === 'drought' || pending.kind === 'pray') drought(world, village, pending.kind === 'pray' ? 3 : 6);
+  else if (pending.kind === 'drought' || pending.kind === 'pray') {
+    drought(world, village, pending.kind === 'pray' ? 3 : 6);
+    if (village) world.applyWeather('drought', village.x, village.y, 10, 'director');
+  }
   else if (pending.kind === 'meteor') {
     const x = Math.floor((village?.x ?? world.width / 2) + (village ? 10 : 0));
     const y = Math.floor(village?.y ?? world.height / 2);
     world.applyDisaster('meteor', x, y, 4, 'director');
+  } else if (['storm', 'blizzard', 'aurora', 'bloom'].includes(pending.kind) && village) {
+    world.applyWeather(pending.kind, village.x, village.y, 9, 'director');
   } else if (pending.kind === 'gift' && village) {
     village.food += 14;
     village.iron = (village.iron ?? 0) + 3;
@@ -94,8 +99,16 @@ export function tickDirector(world, dt) {
   else if (hold) omen(world, 'gift', hold.low);
   else if (calm(world) && world.year >= (story.lastYear ?? 0) + 6) {
     const focus = a ?? need ?? strongest(world);
-    const pick = world.units.some(u => u.kind === 'sheep') ? 'wolves' : world.rng.next() < .55 ? 'drought' : 'meteor';
-    omen(world, pick, focus);
+    const pick = world.rng.next();
+    const omenKind = world.units.some(u => u.kind === 'sheep') && pick < .18
+      ? 'wolves'
+      : pick < .34 ? 'drought'
+      : pick < .48 ? 'storm'
+      : pick < .6 ? 'blizzard'
+      : pick < .74 ? 'aurora'
+      : pick < .86 ? 'bloom'
+      : 'meteor';
+    omen(world, omenKind, focus);
   } else if ((world.god.presence ?? 0) > 14 && a && b) omen(world, 'escalate', a, b);
 }
 

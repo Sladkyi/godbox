@@ -72,6 +72,19 @@ test('ambient mood follows fire and war', () => {
   assert.equal(moodOf(w), 'fire');
 });
 
+test('epoch stories name the town and the new roofs', () => {
+  const text = compose('epoch', { year: 9, town: 'Cedar Cape', stage: 'hamlet' });
+  assert.ok(text.includes('Cedar Cape') && text.includes('hamlet'));
+  assert.ok(!text.includes('Age of'));
+});
+
+test('herd and fold stories name the town and the animal', () => {
+  const herd = compose('herd', { who: 'Mira', town: 'Quiet Valley', beast: 'cow' });
+  assert.ok(herd.includes('Mira') && herd.includes('Quiet Valley') && herd.includes('cow'));
+  const fold = compose('fold', { year: 4, town: 'Quiet Valley' });
+  assert.ok(fold.includes('Quiet Valley') && fold.includes('fold'));
+});
+
 test('ties bump and clamp', () => {
   const a = { id: 1, ties: [] }, b = { id: 2 };
   bumpTie(a, b, { debt: 8, legend: 'the debt of Ash Ridge' });
